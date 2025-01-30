@@ -1,153 +1,252 @@
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
+import 'package:intl/intl.dart';
 
-void main() => runApp(RemedyApp());
+void main() {
+  runApp(MyApp());
+}
 
-class RemedyApp extends StatelessWidget {
+class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'Lista de Remédios',
-      theme: ThemeData(primarySwatch: Colors.blue),
-      home: RemedyListScreen(),
+      debugShowCheckedModeBanner: false,
+      home: HomePage(),
     );
   }
 }
 
-class RemedyListScreen extends StatefulWidget {
-  @override
-  _RemedyListScreenState createState() => _RemedyListScreenState();
+class Medicine {
+  String name;
+  int pillsInBox;
+  int timesPerDay;
+  DateTime startDate;
+
+  Medicine({
+    required this.name,
+    required this.pillsInBox,
+    required this.timesPerDay,
+    required this.startDate,
+  });
+
+  int get remainingDays => (pillsInBox / timesPerDay).floor();
+
+  Map<String, dynamic> toJson() => {
+    'name': name,
+    'pillsInBox': pillsInBox,
+    'timesPerDay': timesPerDay,
+    'startDate': startDate.toIso8601String(),
+  };
+
+  factory Medicine.fromJson(Map<String, dynamic> json) {
+    return Medicine(
+      name: json['name'],
+      pillsInBox: json['pillsInBox'],
+      timesPerDay: json['timesPerDay'],
+      startDate: DateTime.parse(json['startDate']),
+    );
+  }
 }
 
-class _RemedyListScreenState extends State<RemedyListScreen> {
-  List<Map<String, dynamic>> remedies = [];
+class HomePage extends StatefulWidget {
+  @override
+  _HomePageState createState() => _HomePageState();
+}
 
-  void _addRemedy(String name, List<String> times) {
+class _HomePageState extends State<HomePage> {
+  List<Medicine> medicines = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadMedicines();
+  }
+
+  void _loadMedicines() async {
+    final prefs = await SharedPreferences.getInstance();
+    final data = prefs.getString('medicines') ?? '[]';
     setState(() {
-      remedies.add({'name': name, 'times': times});
+      medicines = (json.decode(data) as List)
+          .map((e) => Medicine.fromJson(e))
+          .toList();
     });
   }
 
-  void _showAddRemedyDialog() {
-    final _nameController = TextEditingController();
-    final List<String> _times = [];
+  void _saveMedicines() async {
+    final prefs = await SharedPreferences.getInstance();
+    prefs.setString('medicines', json.encode(medicines));
+  }
 
-    showDialog(
-      context: context,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setState) => AlertDialog(
-          title: Text('Adicionar Remédio'),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: _nameController,
-                decoration: InputDecoration(labelText: 'Nome do Remédio'),
-              ),
-              SizedBox(height: 10),
-              Text(
-                'Horários:',
-                style: TextStyle(fontWeight: FontWeight.bold),
-              ),
-              ..._times.map((time) {
-                return Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    Text(time, style: TextStyle(fontSize: 16)),
-                    IconButton(
-                      icon: Icon(Icons.delete, color: Colors.red),
-                      onPressed: () {
-                        setState(() {
-                          _times.remove(time);
-                        });
-                      },
-                    ),
-                  ],
-                );
-              }).toList(),
-              TextButton.icon(
-                onPressed: () async {
-                  final timeOfDay = await showTimePicker(
-                    context: context,
-                    initialTime: TimeOfDay.now(),
-                  );
-
-                  if (timeOfDay != null) {
-                    final formattedTime =
-                    timeOfDay.format(context); // Formata o horário (ex.: 08:00)
-                    setState(() {
-                      _times.add(formattedTime);
-                    });
-                  }
-                },
-                icon: Icon(Icons.add),
-                label: Text('Adicionar Horário'),
-              ),
-            ],
-          ),
-          actions: [
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: Text('Cancelar'),
-            ),
-            ElevatedButton(
-              onPressed: () {
-                if (_nameController.text.isNotEmpty && _times.isNotEmpty) {
-                  _addRemedy(_nameController.text, _times);
-                  Navigator.of(context).pop();
-                }
-              },
-              child: Text('Adicionar'),
-            ),
-          ],
-        ),
+  void _addOrEditMedicine({Medicine? medicine, int? index}) async {
+    final updatedMedicine = await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (context) => AddMedicinePage(medicine: medicine),
       ),
     );
+
+    if (updatedMedicine != null) {
+      setState(() {
+        if (index == null) {
+          medicines.add(updatedMedicine);
+        } else {
+          medicines[index] = updatedMedicine;
+        }
+        _saveMedicines();
+      });
+    }
+  }
+
+  void _removeMedicine(int index) {
+    setState(() {
+      medicines.removeAt(index);
+      _saveMedicines();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Text('Meus Remédios')),
+      body: ListView.builder(
+        itemCount: medicines.length,
+        itemBuilder: (context, index) {
+          final medicine = medicines[index];
+          return ListTile(
+            title: Text(medicine.name),
+            subtitle: Text('Dias restantes: ${medicine.remainingDays}'),
+            trailing: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                IconButton(
+                  icon: Icon(Icons.edit, color: Colors.blue),
+                  onPressed: () => _addOrEditMedicine(
+                    medicine: medicine,
+                    index: index,
+                  ),
+                ),
+                IconButton(
+                  icon: Icon(Icons.delete, color: Colors.red),
+                  onPressed: () => _removeMedicine(index),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+      floatingActionButton: FloatingActionButton(
+        child: Icon(Icons.add),
+        onPressed: () => _addOrEditMedicine(),
+      ),
+    );
+  }
+}
+
+class AddMedicinePage extends StatefulWidget {
+  final Medicine? medicine;
+
+  AddMedicinePage({this.medicine});
+
+  @override
+  _AddMedicinePageState createState() => _AddMedicinePageState();
+}
+
+class _AddMedicinePageState extends State<AddMedicinePage> {
+  final _formKey = GlobalKey<FormState>();
+  final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _pillsController = TextEditingController();
+  final TextEditingController _timesController = TextEditingController();
+  DateTime? _startDate;
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.medicine != null) {
+      _nameController.text = widget.medicine!.name;
+      _pillsController.text = widget.medicine!.pillsInBox.toString();
+      _timesController.text = widget.medicine!.timesPerDay.toString();
+      _startDate = widget.medicine!.startDate;
+    }
+  }
+
+  void _pickStartDate() async {
+    DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2100),
+    );
+    if (picked != null) {
+      setState(() {
+        _startDate = picked;
+      });
+    }
+  }
+
+  void _saveMedicine() {
+    if (_formKey.currentState!.validate() && _startDate != null) {
+      final newMedicine = Medicine(
+        name: _nameController.text,
+        pillsInBox: int.parse(_pillsController.text),
+        timesPerDay: int.parse(_timesController.text),
+        startDate: _startDate!,
+      );
+      Navigator.pop(context, newMedicine);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: Text('Lista de Remédios'),
+        title: Text(widget.medicine == null ? 'Adicionar Remédio' : 'Editar Remédio'),
       ),
-      body: remedies.isEmpty
-          ? Center(
-        child: Text(
-          'Nenhum remédio adicionado ainda!',
-          style: TextStyle(fontSize: 18, color: Colors.grey),
+      body: Padding(
+        padding: EdgeInsets.all(16.0),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start, // ALINHA A DATA À ESQUERDA
+            children: [
+              TextFormField(
+                controller: _nameController,
+                decoration: InputDecoration(labelText: 'Nome do Remédio'),
+                validator: (value) => value!.isEmpty ? 'Digite um nome' : null,
+              ),
+              TextFormField(
+                controller: _pillsController,
+                decoration: InputDecoration(labelText: 'Quantidade na caixa'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Digite um número' : null,
+              ),
+              TextFormField(
+                controller: _timesController,
+                decoration: InputDecoration(labelText: 'Vezes ao dia'),
+                keyboardType: TextInputType.number,
+                validator: (value) => value!.isEmpty ? 'Digite um número' : null,
+              ),
+              SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _pickStartDate,
+                child: Text('Escolher Data de Início'),
+              ),
+              if (_startDate != null) // MOSTRA A DATA ESCOLHIDA APÓS SELECIONAR
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: Text(
+                    'Data escolhida: ${DateFormat('dd/MM/yyyy').format(_startDate!)}',
+                    style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ),
+              SizedBox(height: 16),
+              ElevatedButton(
+                onPressed: _saveMedicine,
+                child: Text('Salvar'),
+              ),
+            ],
+          ),
         ),
-      )
-          : ListView.builder(
-        itemCount: remedies.length,
-        itemBuilder: (context, index) {
-          final remedy = remedies[index];
-          return Card(
-            margin: EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-            child: ListTile(
-              title: Text(remedy['name']),
-              subtitle: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  ...remedy['times'].map((time) => Text('• $time')).toList(),
-                ],
-              ),
-              trailing: IconButton(
-                icon: Icon(Icons.delete, color: Colors.red),
-                onPressed: () {
-                  setState(() {
-                    remedies.removeAt(index);
-                  });
-                },
-              ),
-            ),
-          );
-        },
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: _showAddRemedyDialog,
-        child: Icon(Icons.add),
       ),
     );
   }
